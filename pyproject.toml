@@ -1,0 +1,15 @@
+[project]
+name = "tally-run"
+version = "1.0.0"
+description = "Run a long job, get told when it finishes or breaks. Generic engine + optional plugins."
+requires-python = ">=3.8"
+license = {text = "MIT"}
+dependencies = []  # stdlib only — by design
+
+[project.scripts]
+tally = "tally.cli:main"
+notify-run = "tally.cli:main"  # backward-compat alias
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
