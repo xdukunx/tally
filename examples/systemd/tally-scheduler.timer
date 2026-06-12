@@ -1,0 +1,15 @@
+# Fires tally-scheduler-oneshot.service every 5s. Pairs with the one-shot unit.
+# (Same naming convention as the repo's other drain timers, e.g.
+# compchem-drain.timer / .service.)
+
+[Unit]
+Description=Run the tally admission-queue scheduler every 5 seconds
+
+[Timer]
+OnBootSec=10
+OnUnitActiveSec=5
+AccuracySec=1s
+Unit=tally-scheduler-oneshot.service
+
+[Install]
+WantedBy=timers.target

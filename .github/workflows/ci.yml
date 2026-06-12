@@ -11,5 +11,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Run tests
+      - name: Run smoke tests
         run: PYTHONPATH=. python tests/test_smoke.py
+      - name: Run queue tests
+        run: PYTHONPATH=. python tests/test_queue.py

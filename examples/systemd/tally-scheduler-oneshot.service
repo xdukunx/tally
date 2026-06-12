@@ -1,0 +1,19 @@
+# tally admission-queue scheduler (v1.5) — one-shot variant, driven by the
+# companion tally-scheduler.timer. systemd owns the cadence; each activation
+# runs exactly one tick() and exits.
+#
+# Install both files together:
+#   cp examples/systemd/tally-scheduler-oneshot.service ~/.config/systemd/user/
+#   cp examples/systemd/tally-scheduler.timer          ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now tally-scheduler.timer
+#
+# Use this instead of (not alongside) tally-scheduler.service.
+
+[Unit]
+Description=tally admission-queue scheduler (single tick)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/tally/config.env
+ExecStart=%h/.local/bin/tally-scheduler --once

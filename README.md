@@ -44,11 +44,52 @@ pip install -e .          # provides `tally` and the `notify-run` alias
 cp examples/config.env.example config.env   # add your Telegram token
 ```
 
+## Queue: `tally submit` (v1.5)
+
+A single-node **resource-admission queue** — not a time scheduler. A job
+declares what it needs; the queue runs it only when those resources are free.
+Think "the useful 20% of SLURM for one workstation." No time limits, no
+partitions, no fairshare.
+
+```bash
+# Queue a job. It runs as soon as 16 cores + 8 GB + the GPU are free.
+tally submit --cores 16 --ram 8000 --gpu --name md1 -- pmemd.cuda -i md.in
+
+tally queue          # list pending + running jobs (squeue-style)
+tally status 42      # full detail for one job
+tally cancel 42      # drop a pending job, or SIGTERM a running one
+```
+
+Submit applies **two gates**:
+
+1. **Feasible?** If the request can never fit this machine (e.g. 31 cores on a
+   30-usable box), it's rejected at submit time — never queued, since it would
+   wait forever.
+2. **Available now?** A feasible job is enqueued; the scheduler starts it on the
+   first tick where the cores/RAM/GPU it asked for are actually free.
+
+Run the scheduler with the bundled `tally-scheduler` loop (or a systemd timer —
+see `examples/systemd/`). Capacity is configured via env vars
+(`TALLY_TOTAL_CORES`, `TALLY_SYSTEM_RESERVE_CORES`, `TALLY_GPU_EXCLUSIVE`, …);
+see `examples/config.env.example`.
+
+### Caveats (read before you trust the numbers)
+
+- **RAM gating is best-effort.** tally checks free RAM at admission but cannot
+  prevent a running job from later ballooning and triggering the OOM killer.
+  True enforcement needs cgroups v2 memory limits — that's v2. We say so plainly
+  rather than imply isolation we don't provide.
+- **Core counts are advisory** unless you also pin with `taskset`/`cpuset`. v1.5
+  gates on *declared* cores; actual CPU pinning (cpuset cgroup) is a v2
+  hardening step.
+
 ## Roadmap
 
-- **v1.x** — runner + plugin verdicts (this).
-- **v1.5** — optional single-node queue: `tally submit` jobs that wait for
-  GPU/CPU/RAM to free up before running. The lightweight SLURM alternative.
-- **v2** — persistent daemon, Telegram queue control, live progress.
+- **v1.x** — runner + plugin verdicts.
+- **v1.5** — single-node admission queue: `tally submit` jobs that wait for
+  GPU/CPU/RAM to free up before running (this). The lightweight SLURM
+  alternative.
+- **v2** — persistent daemon, Telegram queue control, live progress, cgroups v2
+  RAM/CPU enforcement. See `docs/FUTURE_USECASE.md` for the next concrete step.
 
 MIT licensed.

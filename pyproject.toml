@@ -9,6 +9,7 @@ dependencies = []  # stdlib only — by design
 [project.scripts]
 tally = "tally.cli:main"
 notify-run = "tally.cli:main"  # backward-compat alias
+tally-scheduler = "tally.scheduler:main"  # standalone admission-queue loop (v1.5)
 
 [build-system]
 requires = ["setuptools>=61"]

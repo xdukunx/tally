@@ -1,0 +1,28 @@
+# tally admission-queue scheduler (v1.5) — long-running variant.
+#
+# Install as a user unit (recommended; runs as you, sees your GPU/cores):
+#   mkdir -p ~/.config/systemd/user
+#   cp examples/systemd/tally-scheduler.service ~/.config/systemd/user/
+#   # edit EnvironmentFile path below to your config.env, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now tally-scheduler.service
+#
+# This is the simpler of the two patterns: one process that calls tick() every
+# TALLY_SCHEDULER_INTERVAL seconds. Prefer it over the timer variant unless you
+# specifically want systemd to own the cadence.
+
+[Unit]
+Description=tally admission-queue scheduler
+After=network.target
+
+[Service]
+Type=simple
+# config.env holds TALLY_TOTAL_CORES, TALLY_TELEGRAM_*, etc. Adjust the path.
+EnvironmentFile=%h/.config/tally/config.env
+Environment=TALLY_SCHEDULER_INTERVAL=5
+ExecStart=%h/.local/bin/tally-scheduler
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
