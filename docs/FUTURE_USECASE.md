@@ -1,8 +1,8 @@
 # Future use case (v2): "Drive the queue from your phone"
 
-Status: planning — not implemented. This is the concrete next step after the
-v1.5 admission queue, written so whoever picks it up has a real target instead
-of the vague "v2: persistent daemon, Telegram control" roadmap line.
+Status: **implemented in v2** (`tally/daemon.py`, `tallyd`). Kept as the design
+record; the "Explicitly still out of scope" section at the bottom is the
+remaining future work (cgroups enforcement, live progress).
 
 ## The use case, told as a story
 

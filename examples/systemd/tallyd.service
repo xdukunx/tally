@@ -1,0 +1,26 @@
+# tallyd (v2) — scheduler + Telegram remote control in one daemon.
+# This is the recommended unit: it replaces tally-scheduler.service (the
+# scheduler is included) and adds phone control of the queue.
+#
+# Install as a user unit:
+#   mkdir -p ~/.config/systemd/user ~/.config/tally
+#   cp examples/config.env.example ~/.config/tally/config.env   # then edit it
+#   cp examples/systemd/tallyd.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now tallyd.service
+#   loginctl enable-linger $USER    # keep it running after you log out
+
+[Unit]
+Description=tally daemon: job scheduler + Telegram queue control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/tally/config.env
+ExecStart=%h/.local/bin/tallyd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

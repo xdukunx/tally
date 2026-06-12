@@ -1,29 +1,108 @@
 # tally
 
-**Run a long job. Walk away. Get told when it finishes — or the moment it breaks.**
+**A lightweight SLURM alternative for one machine — with your phone as the
+control panel.**
 
-It's 2 AM. Your 14-hour simulation is on hour 9. You've checked the terminal
-forty times. tally is the tool that lets you stop checking: wrap any
-long-running command, and tally pushes you a Telegram message when it
-completes, fails, or starts emitting trouble.
+Submit jobs, let them queue until the CPU/RAM/GPU they need is free, get a
+Telegram message the moment each one finishes or breaks — and check or manage
+the whole queue from chat, without ever opening a terminal.
 
 ```bash
-tally run --bg --log run.log --name nightly_md -- ./my_simulation input.dat
-# -> returns to your shell immediately; job runs detached
-# -> phone buzzes when it's done or if it dies
+tally submit --cores 16 --ram 8000 --gpu --name md1 -- pmemd.cuda -i md.in
+# -> "queued as job 42" — runs as soon as 16 cores + 8 GB + the GPU are free
+# -> phone buzzes when it finishes (or the moment it starts failing)
 ```
 
-No daemon to install. No config required to start (falls back to printing
-locally). Pure Python standard library — zero dependencies.
+From your phone, to the same bot that pinged you:
+
+```
+/queue                 -> live table of pending + running jobs
+/status 42             -> full detail for one job
+/cancel 42             -> drop it (pending) or stop it (running)
+/priority 43 9         -> bump a pending job up the queue
+/resubmit 42           -> re-queue a finished/failed job
+```
+
+Pure Python standard library. **Zero dependencies. No root. No cluster.**
 
 ## Why tally instead of `nohup` / `tmux` / SLURM
 
-- `nohup &` detaches but tells you nothing.
-- `tmux` keeps a session but you still have to *look*.
-- SLURM is a multi-node cluster scheduler — massive overkill for one machine.
+- `nohup &` detaches but tells you nothing, and lets ten jobs trample each other.
+- `tmux` keeps a session, but you still have to *look*.
+- SLURM is a multi-node cluster scheduler — installing it on one workstation is
+  a weekend of pain for features you'll never use.
 
-tally fills the gap: a lightweight single-machine job runner that actually
-notifies you, and understands *why* a job failed, not just that it did.
+tally is the useful 20% of SLURM for a single machine: a resource-admission
+queue (jobs wait until the cores/RAM/GPU they declared are actually free),
+plus the part SLURM never gave you — push notifications and remote control
+through the bot you already chat with.
+
+## Install (two minutes)
+
+```bash
+git clone https://github.com/xdukunx/tally.git
+cd tally
+pip install .        # provides: tally, tallyd, tally-scheduler, notify-run
+
+# Telegram (optional but the whole point):
+# 1. make a bot with @BotFather, get the token
+# 2. get your chat id from @userinfobot
+mkdir -p ~/.config/tally
+cp examples/config.env.example ~/.config/tally/config.env   # edit token + chat id
+```
+
+Then start the daemon (scheduler + Telegram control in one process):
+
+```bash
+source ~/.config/tally/config.env
+tallyd
+```
+
+or install it properly so it survives reboots — see
+`examples/systemd/tallyd.service` (copy, `systemctl --user enable --now tallyd`).
+No Telegram configured? Everything still works; notifications print to stdout
+and `tallyd` runs the scheduler only.
+
+## Easy commands
+
+```bash
+tally submit --cores 8 -- ./my_simulation input.dat   # queue a job
+tally queue                                           # what's running / waiting
+tally status 42                                       # one job, full detail
+tally cancel 42                                       # remove / stop a job
+tally run --bg --log run.log -- ./quick_job           # v1.0 style: run NOW, just notify
+```
+
+Submit applies **two gates**:
+
+1. **Feasible?** A request that can *never* fit this machine (31 cores on a
+   30-usable box) is rejected at submit time — never queued, since it would
+   wait forever.
+2. **Available now?** A feasible job waits in the queue; the scheduler starts
+   it on the first tick where the cores/RAM/GPU it asked for are actually free.
+   Priority decides ties; the GPU is exclusive (one GPU job at a time).
+
+Capacity is configured in `config.env` (`TALLY_TOTAL_CORES`,
+`TALLY_SYSTEM_RESERVE_CORES`, `TALLY_GPU_EXCLUSIVE`, …) — set it once per
+machine.
+
+## Checking jobs straight from your phone
+
+`tallyd` makes the notification bot bidirectional. Text it `/queue` from the
+bus, `/cancel 12` from bed when the 2 AM failure ping arrives, `/resubmit 12`
+after you realize it just needed the retry. Replies come back as aligned
+monospace tables.
+
+**Security, because a chat that controls your workstation deserves some:**
+
+- Only messages from **your** configured chat id are processed. Anything else
+  is dropped silently.
+- `/submit` from chat — starting *new* commands remotely — is **off by
+  default**. Set `TALLY_ALLOW_REMOTE_SUBMIT=1` to opt in. Queue management
+  (list, status, cancel, priority, resubmit) is the safe default surface.
+- Submitted commands are passed as argv lists, never through a shell, and go
+  through the same feasibility gate as local submits.
+- Your bot token lives in `config.env`, which is never committed.
 
 ## Smart failure detection (plugins)
 
@@ -37,59 +116,24 @@ program. Optional plugins add domain awareness:
 Writing a plugin is two methods (`matches`, `inspect`). The engine never
 changes — see `tally/plugins/base.py`.
 
-## Install
-
-```bash
-pip install -e .          # provides `tally` and the `notify-run` alias
-cp examples/config.env.example config.env   # add your Telegram token
-```
-
-## Queue: `tally submit` (v1.5)
-
-A single-node **resource-admission queue** — not a time scheduler. A job
-declares what it needs; the queue runs it only when those resources are free.
-Think "the useful 20% of SLURM for one workstation." No time limits, no
-partitions, no fairshare.
-
-```bash
-# Queue a job. It runs as soon as 16 cores + 8 GB + the GPU are free.
-tally submit --cores 16 --ram 8000 --gpu --name md1 -- pmemd.cuda -i md.in
-
-tally queue          # list pending + running jobs (squeue-style)
-tally status 42      # full detail for one job
-tally cancel 42      # drop a pending job, or SIGTERM a running one
-```
-
-Submit applies **two gates**:
-
-1. **Feasible?** If the request can never fit this machine (e.g. 31 cores on a
-   30-usable box), it's rejected at submit time — never queued, since it would
-   wait forever.
-2. **Available now?** A feasible job is enqueued; the scheduler starts it on the
-   first tick where the cores/RAM/GPU it asked for are actually free.
-
-Run the scheduler with the bundled `tally-scheduler` loop (or a systemd timer —
-see `examples/systemd/`). Capacity is configured via env vars
-(`TALLY_TOTAL_CORES`, `TALLY_SYSTEM_RESERVE_CORES`, `TALLY_GPU_EXCLUSIVE`, …);
-see `examples/config.env.example`.
-
-### Caveats (read before you trust the numbers)
+## Caveats (read before you trust the numbers)
 
 - **RAM gating is best-effort.** tally checks free RAM at admission but cannot
   prevent a running job from later ballooning and triggering the OOM killer.
-  True enforcement needs cgroups v2 memory limits — that's v2. We say so plainly
-  rather than imply isolation we don't provide.
-- **Core counts are advisory** unless you also pin with `taskset`/`cpuset`. v1.5
-  gates on *declared* cores; actual CPU pinning (cpuset cgroup) is a v2
-  hardening step.
+  True enforcement needs cgroups v2 memory limits — that's a future hardening
+  step. We say so plainly rather than imply isolation we don't provide.
+- **Core counts are advisory** unless you also pin with `taskset`/`cpuset`.
+  tally gates on *declared* cores; actual CPU pinning (cpuset cgroup) is a
+  future hardening step.
+- The queue/daemon target **Linux** (the scheduler uses POSIX process groups
+  and `/proc`; the daemon is meant to live under systemd).
 
 ## Roadmap
 
-- **v1.x** — runner + plugin verdicts.
-- **v1.5** — single-node admission queue: `tally submit` jobs that wait for
-  GPU/CPU/RAM to free up before running (this). The lightweight SLURM
-  alternative.
-- **v2** — persistent daemon, Telegram queue control, live progress, cgroups v2
-  RAM/CPU enforcement. See `docs/FUTURE_USECASE.md` for the next concrete step.
+- **v1.x** — runner + plugin verdicts. ✅
+- **v1.5** — single-node admission queue (`tally submit`). ✅
+- **v2** — `tallyd`: persistent daemon + Telegram queue control. ✅ (this)
+- **next** — cgroups v2 RAM/CPU enforcement, live in-job progress over
+  Telegram. See `docs/FUTURE_USECASE.md`.
 
 MIT licensed.

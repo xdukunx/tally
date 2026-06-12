@@ -15,3 +15,5 @@ jobs:
         run: PYTHONPATH=. python tests/test_smoke.py
       - name: Run queue tests
         run: PYTHONPATH=. python tests/test_queue.py
+      - name: Run daemon tests
+        run: PYTHONPATH=. python tests/test_daemon.py

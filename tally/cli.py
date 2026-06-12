@@ -32,7 +32,7 @@ from .plugins.compchem import CompChemPlugin
 from .plugins.generic import GenericPlugin
 from .resources import Capacity, Request, check_feasible
 
-QUEUE_COMMANDS = {"submit", "queue", "cancel", "status"}
+QUEUE_COMMANDS = {"submit", "queue", "cancel", "status", "daemon"}
 
 
 def _registry():
@@ -89,16 +89,7 @@ def _submit(argv) -> int:
     if not cmd:
         p.error("no command given (use: tally submit --cores N -- your_command args)")
 
-    db.init_db()
-    req = Request(cores=args.cores, ram_mb=args.ram, gpu=args.gpu)
-    cap = Capacity()
-    ok, reason = check_feasible(req, cap)
-    if not ok:
-        # Infeasible: never enqueue (it would wait forever). Print verbatim.
-        print(reason, file=sys.stderr)
-        return 1
-
-    job_id = db.insert_job(
+    rc, msg = submit_op(
         cmd,
         cwd=os.getcwd(),
         cores=args.cores,
@@ -107,8 +98,24 @@ def _submit(argv) -> int:
         name=args.name,
         priority=args.priority,
     )
-    print(f"queued as job {job_id}")
-    return 0
+    print(msg, file=sys.stderr if rc else sys.stdout)
+    return rc
+
+
+def submit_op(cmd, *, cwd, cores, ram_mb=0, gpu=False, name=None, priority=0):
+    """Gate-1 + enqueue. Shared by the CLI and tallyd (v2 remote submit).
+    Returns (rc, message)."""
+    db.init_db()
+    req = Request(cores=cores, ram_mb=ram_mb, gpu=gpu)
+    ok, reason = check_feasible(req, Capacity())
+    if not ok:
+        # Infeasible: never enqueue (it would wait forever). Message verbatim.
+        return 1, reason
+    job_id = db.insert_job(
+        cmd, cwd=cwd, cores=cores, ram_mb=ram_mb, gpu=gpu,
+        name=name, priority=priority,
+    )
+    return 0, f"queued as job {job_id}"
 
 
 # --------------------------------------------------------------------------
@@ -125,14 +132,15 @@ def _fmt_age(submitted_at) -> str:
     return f"{secs // 86400}d"
 
 
-def _queue(argv) -> int:
-    argparse.ArgumentParser(prog="tally queue").parse_args(argv)
+def format_queue() -> str:
+    """The squeue-style table as a string. Shared by the CLI and tallyd."""
     db.init_db()
     rows = list(db.get_running()) + list(db.get_pending())
+    if not rows:
+        return "(no pending or running jobs)"
     headers = ["ID", "NAME", "STATE", "CORES", "RAM", "GPU", "AGE"]
     widths = [4, 16, 9, 5, 7, 3, 6]
-    line = "  ".join(h.ljust(w) for h, w in zip(headers, widths))
-    print(line)
+    lines = ["  ".join(h.ljust(w) for h, w in zip(headers, widths))]
     for r in rows:
         cells = [
             str(r["id"]),
@@ -143,31 +151,30 @@ def _queue(argv) -> int:
             "yes" if r["gpu"] else "no",
             _fmt_age(r["submitted_at"]),
         ]
-        print("  ".join(c.ljust(w) for c, w in zip(cells, widths)))
-    if not rows:
-        print("(no pending or running jobs)")
+        lines.append("  ".join(c.ljust(w) for c, w in zip(cells, widths)))
+    return "\n".join(lines)
+
+
+def _queue(argv) -> int:
+    argparse.ArgumentParser(prog="tally queue").parse_args(argv)
+    print(format_queue())
     return 0
 
 
 # --------------------------------------------------------------------------
 # `tally cancel <id>`
 # --------------------------------------------------------------------------
-def _cancel(argv) -> int:
-    p = argparse.ArgumentParser(prog="tally cancel")
-    p.add_argument("id", type=int)
-    args = p.parse_args(argv)
-
+def cancel_op(job_id: int):
+    """Cancel a job by id. Shared by the CLI and tallyd. Returns (rc, message)."""
     db.init_db()
-    job = db.get_job(args.id)
+    job = db.get_job(job_id)
     if job is None:
-        print(f"no such job {args.id}", file=sys.stderr)
-        return 1
+        return 1, f"no such job {job_id}"
 
     state = job["state"]
     if state == "pending":
-        db.cancel_job(args.id)
-        print(f"cancelled pending job {args.id}")
-        return 0
+        db.cancel_job(job_id)
+        return 0, f"cancelled pending job {job_id}"
     if state == "running":
         pid = job["pid"]
         if pid:
@@ -179,26 +186,25 @@ def _cancel(argv) -> int:
                 pass
         # Mark it terminal now; resources are freed the moment it leaves the
         # 'running' set (the next tick recomputes totals without it).
-        db.mark_finished(args.id, None)
-        print(f"SIGTERM sent to job {args.id} (pid {pid}); marked failed")
-        return 0
-    print(f"job {args.id} is {state}; nothing to cancel")
-    return 1
+        db.mark_finished(job_id, None)
+        return 0, f"SIGTERM sent to job {job_id} (pid {pid}); marked failed"
+    return 1, f"job {job_id} is {state}; nothing to cancel"
+
+
+def _cancel(argv) -> int:
+    p = argparse.ArgumentParser(prog="tally cancel")
+    p.add_argument("id", type=int)
+    args = p.parse_args(argv)
+    rc, msg = cancel_op(args.id)
+    print(msg, file=sys.stderr if rc else sys.stdout)
+    return rc
 
 
 # --------------------------------------------------------------------------
 # `tally status <id>`
 # --------------------------------------------------------------------------
-def _status(argv) -> int:
-    p = argparse.ArgumentParser(prog="tally status")
-    p.add_argument("id", type=int)
-    args = p.parse_args(argv)
-
-    db.init_db()
-    job = db.get_job(args.id)
-    if job is None:
-        print(f"no such job {args.id}", file=sys.stderr)
-        return 1
+def format_status(job) -> str:
+    """Full row detail as a string. Shared by the CLI and tallyd."""
 
     def fmt_time(t):
         return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) if t else "-"
@@ -223,9 +229,29 @@ def _status(argv) -> int:
         ("reject_reason", job["reject_reason"] or "-"),
     ]
     width = max(len(k) for k, _ in fields)
-    for k, v in fields:
-        print(f"{k.ljust(width)} : {v}")
+    return "\n".join(f"{k.ljust(width)} : {v}" for k, v in fields)
+
+
+def _status(argv) -> int:
+    p = argparse.ArgumentParser(prog="tally status")
+    p.add_argument("id", type=int)
+    args = p.parse_args(argv)
+
+    db.init_db()
+    job = db.get_job(args.id)
+    if job is None:
+        print(f"no such job {args.id}", file=sys.stderr)
+        return 1
+    print(format_status(job))
     return 0
+
+
+# --------------------------------------------------------------------------
+# `tally daemon`  (v2: scheduler + Telegram remote control)
+# --------------------------------------------------------------------------
+def _daemon(argv) -> int:
+    from . import daemon  # local import: the daemon pulls in this module's ops
+    return daemon.main(argv)
 
 
 # --------------------------------------------------------------------------
@@ -240,6 +266,7 @@ def main(argv=None) -> int:
             "queue": _queue,
             "cancel": _cancel,
             "status": _status,
+            "daemon": _daemon,
         }[argv[0]](argv[1:])
 
     # Default path: `tally run ...` or bare `notify-run ...`.

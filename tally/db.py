@@ -194,6 +194,42 @@ def mark_rejected(job_id: int, reason: str, db_path: Optional[str] = None) -> No
         conn.close()
 
 
+def set_priority(job_id: int, priority: int, db_path: Optional[str] = None) -> bool:
+    """Re-rank a pending job. Returns False if the job isn't pending (running
+    jobs can't be re-ranked — they already hold their resources)."""
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "UPDATE queue SET priority=? WHERE id=? AND state='pending'",
+            (priority, job_id),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def resubmit(job_id: int, db_path: Optional[str] = None) -> Optional[int]:
+    """Clone a terminal (done/failed/rejected) job back to pending.
+
+    Returns the new job id, or None if the source doesn't exist or is still
+    pending/running (resubmitting those would duplicate live work)."""
+    job = get_job(job_id, db_path)
+    if job is None or job["state"] not in ("done", "failed", "rejected"):
+        return None
+    return insert_job(
+        json.loads(job["command"]),
+        cwd=job["cwd"],
+        cores=job["cores"],
+        ram_mb=job["ram_mb"],
+        gpu=bool(job["gpu"]),
+        name=job["name"],
+        priority=job["priority"],
+        user=job["user"],
+        db_path=db_path,
+    )
+
+
 def cancel_job(job_id: int, db_path: Optional[str] = None) -> None:
     """Delete a (pending) job outright. Running jobs are handled by the CLI:
     it SIGTERMs the pid and lets the next tick reap it as failed."""

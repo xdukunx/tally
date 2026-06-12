@@ -41,6 +41,25 @@ def stdout_notifier():
     return notify
 
 
+def poll_updates(token: str, offset=None, timeout: int = 10) -> list:
+    """Long-poll Telegram getUpdates. Returns the raw update list ([] on any
+    network error — the daemon must never die because Telegram hiccuped).
+
+    `offset` is the Telegram update-id watermark: pass last_update_id + 1 to
+    acknowledge everything seen so far."""
+    params = {"timeout": int(timeout)}
+    if offset is not None:
+        params["offset"] = offset
+    url = f"https://api.telegram.org/bot{token}/getUpdates?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout + 15) as r:
+            data = json.load(r)
+        return data.get("result", []) if data.get("ok") else []
+    except Exception as e:
+        print(f"[tally] telegram poll failed: {e}", file=sys.stderr)
+        return []
+
+
 def from_env():
     """Build a notifier from environment variables.
 

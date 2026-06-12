@@ -1,7 +1,7 @@
 [project]
 name = "tally-run"
-version = "1.0.0"
-description = "Run a long job, get told when it finishes or breaks. Generic engine + optional plugins."
+version = "2.0.0"
+description = "A lightweight single-machine SLURM alternative with Telegram notifications and phone control: submit jobs, get told when they finish or break, manage the queue from chat."
 requires-python = ">=3.8"
 license = {text = "MIT"}
 dependencies = []  # stdlib only — by design
@@ -10,6 +10,7 @@ dependencies = []  # stdlib only — by design
 tally = "tally.cli:main"
 notify-run = "tally.cli:main"  # backward-compat alias
 tally-scheduler = "tally.scheduler:main"  # standalone admission-queue loop (v1.5)
+tallyd = "tally.daemon:main"  # scheduler + Telegram remote control (v2)
 
 [build-system]
 requires = ["setuptools>=61"]
