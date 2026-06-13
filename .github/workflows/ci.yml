@@ -13,6 +13,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Run smoke tests
         run: PYTHONPATH=. python tests/test_smoke.py
+      - name: Run batch-script tests
+        run: PYTHONPATH=. python tests/test_batch.py
       - name: Run queue tests
         run: PYTHONPATH=. python tests/test_queue.py
       - name: Run daemon tests

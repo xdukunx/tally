@@ -1,0 +1,5 @@
+[console_scripts]
+notify-run = tally.cli:main
+tally = tally.cli:main
+tally-scheduler = tally.scheduler:main
+tallyd = tally.daemon:main

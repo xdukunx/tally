@@ -7,10 +7,31 @@ Submit jobs, let them queue until the CPU/RAM/GPU they need is free, get a
 Telegram message the moment each one finishes or breaks — and check or manage
 the whole queue from chat, without ever opening a terminal.
 
+Describe a job in a SLURM-style batch script — specs on top, command below:
+
 ```bash
-tally submit --cores 16 --ram 8000 --gpu --name md1 -- pmemd.cuda -i md.in
+# md1.sh
+#!/usr/bin/env bash
+#TALLY --name md1
+#TALLY --cores 16
+#TALLY --ram 8000
+#TALLY --gpu
+
+module load amber
+pmemd.cuda -i md.in -o md.out -p sys.prmtop -c sys.rst
+```
+
+```bash
+tally submit md1.sh
 # -> "queued as job 42" — runs as soon as 16 cores + 8 GB + the GPU are free
 # -> phone buzzes when it finishes (or the moment it starts failing)
+```
+
+Directives are plain shell comments, so the same file still runs with
+`bash md1.sh`. Prefer one-liners? The inline form works too:
+
+```bash
+tally submit --cores 16 --ram 8000 --gpu --name md1 -- pmemd.cuda -i md.in
 ```
 
 From your phone, to the same bot that pinged you:
@@ -66,12 +87,28 @@ and `tallyd` runs the scheduler only.
 ## Easy commands
 
 ```bash
-tally submit --cores 8 -- ./my_simulation input.dat   # queue a job
+tally submit job.sh                                   # queue a batch script
+tally submit --cores 8 -- ./my_simulation input.dat   # queue a one-liner
 tally queue                                           # what's running / waiting
 tally status 42                                       # one job, full detail
 tally cancel 42                                       # remove / stop a job
 tally run --bg --log run.log -- ./quick_job           # v1.0 style: run NOW, just notify
 ```
+
+### Batch scripts (SLURM-style)
+
+`tally submit job.sh` reads `#TALLY` directives from the top of the file for the
+job name and resource specs, then runs the rest as the job. See
+[`examples/md1.sh`](examples/md1.sh). Available directives mirror the inline
+flags exactly:
+
+| Directive | Meaning |
+|-----------|---------|
+| `#TALLY --name X` | job name (defaults to the script's filename) |
+| `#TALLY --cores N` | cores required (required) |
+| `#TALLY --ram MB` | RAM required in MB |
+| `#TALLY --gpu` | needs the GPU (exclusive) |
+| `#TALLY --priority N` | higher runs first |
 
 Submit applies **two gates**:
 
