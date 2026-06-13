@@ -3,3 +3,10 @@ config.env
 __pycache__/
 *.pyc
 .pytest_cache/
+# build artifacts
+build/
+dist/
+*.egg-info/
+*.whl
+# scheduler exit sentinels
+*.exit
